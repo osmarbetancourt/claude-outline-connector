@@ -5,16 +5,16 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      MCP_PORT: "8000"
+      MCP_PORT: "8765"
     ports:
       # Host port 8765 → container 8000.
       # Useful for local testing / direct curl.
-      # Caddy reaches the container at outline-mcp:8000 on the shared network
+      # Caddy reaches the container at outline-mcp:8765 on the shared network
       # and does NOT need this port binding — remove it if you want.
-      - "8765:8000"
+      - "8765:8765"
     networks:
       - caddy_net
 
 networks:
   caddy_net:
-    external: true   # created once on the host: docker network create caddy_net
+    external: true

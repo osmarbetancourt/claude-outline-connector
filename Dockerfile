@@ -24,6 +24,6 @@ COPY --from=builder /app/src /app/src
 # Activate the venv by prepending its bin to PATH
 ENV PATH="/app/.venv/bin:$PATH"
 
-EXPOSE 8000
+EXPOSE 8765
 
 CMD ["python", "-m", "outline_mcp.server"]
