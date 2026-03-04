@@ -8,6 +8,7 @@ import httpx
 import uvicorn
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import Icon
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse
 
@@ -40,6 +41,14 @@ if OAUTH_CLIENT_ID and not MCP_SERVER_URL:
 
 _public_host = MCP_SERVER_URL.removeprefix("https://").removeprefix("http://").rstrip("/")
 
+_OUTLINE_ICON = (
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAACXBIWXMAAAsSAAAL"
+    "EgHS3X78AAAAyElEQVQ4y2NgwA8UWFlZ57KxsXUwkAh4WVhYujg4OL42NDT8AvL/MTExdTIzMycT0ghUx5TB"
+    "zs7+Pjo6+uezZ8/+gwBQ/H99ff1vkEFA1wQCaXUMnUDTw0AazczM/p4/f/4/MgAZAKOdnJw+AL31EcMAoJP/"
+    "bdq06f/79+//owNkA2A0NueDJfn5+SkzAEaPZAPIDkSKoxGYkMKJTUjA1PgBX1LOxJWUgXJ/oElZg6jMxMnJ"
+    "iZyZeoCuTCE1V4Ky80KgYc24FAAAKpNw12wqGrUAAAAASUVORK5CYII="
+)
+
 mcp = FastMCP(
     "outline",
     stateless_http=True,
@@ -48,6 +57,7 @@ mcp = FastMCP(
         allowed_hosts=["localhost", "localhost:*", _public_host],
         allowed_origins=["https://" + _public_host, "http://localhost", "http://localhost:*"],
     ),
+    icons=[Icon(src=_OUTLINE_ICON, mimeType="image/png")],
 )
 
 # ---------------------------------------------------------------------------
