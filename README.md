@@ -69,6 +69,28 @@ uv run python -m outline_mcp.server
 
 ---
 
+## Authentication setup
+
+The server implements **OAuth 2.1 with PKCE** to protect the `/mcp` endpoint. Before adding it to Claude.ai, configure credentials in your `.env`:
+
+```bash
+# 1. Choose any identifier for your connector
+OAUTH_CLIENT_ID=my-outline-connector
+
+# 2. Generate a strong random secret
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+# → paste the output as OAUTH_CLIENT_SECRET
+
+OAUTH_CLIENT_SECRET=<generated secret>
+
+# 3. Set the public HTTPS URL of this server (no trailing slash, no /mcp)
+MCP_SERVER_URL=https://mcp.example.com
+```
+
+> Leave all three empty for local dev — the server runs without auth.
+
+---
+
 ## Connect to Claude
 
 ### Option A — Claude.ai connector (recommended)
@@ -76,23 +98,25 @@ uv run python -m outline_mcp.server
 Works in Claude.ai browser/desktop/mobile **and automatically syncs to Claude Code** when you're logged in.
 
 1. Go to `claude.ai` → **Settings → Connectors → Add custom connector**
-2. Paste your public HTTPS URL: `https://your-server.com/mcp`
-3. Click **Add** — no OAuth setup needed
+2. **Server URL:** `https://your-server.com` *(base URL — not `/mcp`)*
+3. **OAuth Client ID:** paste the value of your `OAUTH_CLIENT_ID` env var
+4. **OAuth Client Secret:** paste the value of your `OAUTH_CLIENT_SECRET` env var
+5. Click **Add** — Claude will perform the OAuth flow automatically
 
 > **HTTPS is required** for Claude.ai connectors. See [Deployment](#deployment) below.
 
 ### Option B — Claude Code CLI (local or remote)
 
 ```bash
-# Local dev
+# Local dev (no auth)
 claude mcp add --transport http outline http://localhost:8000/mcp
 
-# Remote server
-claude mcp add --transport http outline https://your-server.com/mcp
-
-# With scope flags
-claude mcp add --transport http outline --scope user https://your-server.com/mcp
+# Remote server with Bearer token (bypasses OAuth for CLI use)
+claude mcp add --transport http outline https://your-server.com/mcp \
+  --header "Authorization: Bearer <access_token>"
 ```
+
+> The `<access_token>` is issued automatically by the OAuth flow when you connect via Claude.ai. You can also obtain one manually by running the OAuth flow with `curl` — see [Troubleshooting](#troubleshooting).
 
 Verify: `claude mcp list`
 
@@ -194,6 +218,11 @@ Opens a browser UI where you can call each tool interactively and inspect reques
 | `OUTLINE_API_KEY` | Yes | — | Outline API key from Settings → API |
 | `MCP_HOST` | No | `0.0.0.0` | Host the MCP server binds to |
 | `MCP_PORT` | No | `8000` | Port the MCP server listens on |
+| `MCP_SERVER_URL` | OAuth only | — | Public HTTPS base URL of this server, e.g. `https://mcp.example.com` |
+| `OAUTH_CLIENT_ID` | OAuth only | — | Client ID you enter in Claude.ai's connector dialog |
+| `OAUTH_CLIENT_SECRET` | OAuth only | — | Client secret you enter in Claude.ai's connector dialog |
+
+Set all three OAuth vars to enable authentication, or leave all three empty for local dev.
 
 ---
 
@@ -219,8 +248,23 @@ Check `OUTLINE_BASE_URL` — it must be reachable from the server where outline-
 **`KeyError: 'OUTLINE_API_KEY'` on startup**
 The env var is not set. Use `--env-file .env` with Docker or `source .env` locally.
 
-**Claude.ai says "Could not connect"**
-The server must be accessible over public HTTPS. Test with `curl https://your-server.com/mcp` from outside your network.
+**Claude.ai says "Could not connect" or OAuth flow fails**
+- Confirm `MCP_SERVER_URL` matches the URL you enter in Claude.ai exactly (no trailing slash, no `/mcp`)
+- Test the discovery endpoint: `curl https://your-server.com/.well-known/oauth-protected-resource`
+- Make sure the server is accessible over public HTTPS: `curl -X POST https://your-server.com/mcp -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'` should return `401 Unauthorized`
+
+**Get an access token manually (for Claude Code CLI `--header` use)**
+```bash
+# Step 1 — get the auth code (replace values with your own; redirect_uri can be anything)
+curl -v "https://your-server.com/oauth/authorize?response_type=code&client_id=YOUR_CLIENT_ID&redirect_uri=https://example.com/cb&code_challenge=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU&code_challenge_method=S256"
+# Note the `code=` value from the Location header redirect
+
+# Step 2 — exchange code for token
+curl -s -X POST https://your-server.com/oauth/token \
+  -d "grant_type=authorization_code&code=CODE&client_id=YOUR_CLIENT_ID&client_secret=YOUR_SECRET&code_verifier=aaaa"
+# Returns {"access_token":"...","token_type":"bearer","expires_in":2592000}
+```
+> For local testing, use `code_challenge=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU` (SHA256 of empty string) with `code_verifier=` (empty string).
 
 ---
 
