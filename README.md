@@ -30,7 +30,7 @@ Claude Code / Claude.ai
 
 ---
 
-## Quick start — Docker
+## Quick start — Docker Compose (recommended)
 
 ```bash
 git clone https://github.com/osmarbetancourt/claude-outline-connector.git
@@ -39,17 +39,22 @@ cd claude-outline-connector
 cp .env.example .env
 $EDITOR .env   # set OUTLINE_BASE_URL and OUTLINE_API_KEY
 
-docker build -t outline-mcp .
-docker run --env-file .env -p 8000:8000 outline-mcp
+# Create the external network once on the host (shared with Caddy)
+docker network create caddy_net
+
+docker compose up -d --build
 ```
 
 Verify it's running:
 
 ```bash
-curl -s -X POST http://localhost:8000/mcp \
+curl -s -X POST http://localhost:8765/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | jq '.result.tools[].name'
 ```
+
+The container exposes port **8765** on the host for direct access / testing.
+Caddy reaches the container at `outline-mcp:8000` over the shared `caddy_net` network.
 
 ---
 
@@ -130,16 +135,44 @@ Claude.ai connectors require a public HTTPS URL. Here are two paths:
 4. Add `OUTLINE_BASE_URL` and `OUTLINE_API_KEY` as environment variables in the dashboard
 5. Use the generated `https://your-app.onrender.com/mcp` URL as the connector URL
 
-### VPS + Caddy (more control)
+### VPS + Caddy (docker-compose + external network)
+
+This repo is designed to run alongside a separate Caddy container/service that
+shares the `caddy_net` Docker network.
+
+**Step 1 — create the shared network (once per host)**
+
+```bash
+docker network create caddy_net
+```
+
+**Step 2 — wire Caddy to the same network**
+
+In your Caddy repo's `docker-compose.yml`, attach Caddy to `caddy_net`:
+
+```yaml
+services:
+  caddy:
+    image: caddy:latest
+    networks:
+      - caddy_net
+    # ... rest of your Caddy config
+
+networks:
+  caddy_net:
+    external: true
+```
+
+**Step 3 — add a block in your Caddyfile**
 
 ```
-# Caddyfile
-your-server.com {
-    reverse_proxy localhost:8000
+wiki-mcp.yourdomain.com {
+    reverse_proxy outline-mcp:8000
 }
 ```
 
-Run the Docker container, start Caddy — done. Caddy handles HTTPS automatically.
+Caddy resolves `outline-mcp` by container name on the shared network and handles
+HTTPS automatically. No port binding needed on Caddy's side.
 
 ---
 
