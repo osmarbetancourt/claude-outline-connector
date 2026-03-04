@@ -1,0 +1,20 @@
+services:
+  outline-mcp:
+    build: .
+    container_name: outline-mcp
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MCP_PORT: "8765"
+    ports:
+      # Host port 8765 → container 8000.
+      # Useful for local testing / direct curl.
+      # Caddy reaches the container at outline-mcp:8765 on the shared network
+      # and does NOT need this port binding — remove it if you want.
+      - "8765:8765"
+    networks:
+      - caddy_net
+
+networks:
+  caddy_net:
+    external: true

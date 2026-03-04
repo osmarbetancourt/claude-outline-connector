@@ -1,0 +1,39 @@
+name: Deploy to Hetzner (Production)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create `.env` from GitHub secrets (production)
+        run: |
+          cat <<EOF > .env
+          OUTLINE_BASE_URL=${{ secrets.OUTLINE_BASE_URL }}
+          OUTLINE_API_KEY=${{ secrets.OUTLINE_API_KEY }}
+          MCP_HOST=0.0.0.0
+          MCP_PORT=8765
+          MCP_SERVER_URL=${{ secrets.MCP_SERVER_URL }}
+          OAUTH_CLIENT_ID=${{ secrets.OAUTH_CLIENT_ID }}
+          OAUTH_CLIENT_SECRET=${{ secrets.OAUTH_CLIENT_SECRET }}
+          EOF
+
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Copy files to Hetzner server
+        run: |
+          sshpass -p "${{ secrets.HETZNER_PASSWORD }}" rsync -az --delete --include='.env' -e "ssh -o StrictHostKeyChecking=no" ./ ${{ secrets.HETZNER_USER }}@${{ secrets.HETZNER_HOST }}:${{ secrets.HETZNER_PROJECT_PATH }}
+
+      - name: Deploy on Hetzner server
+        run: |
+          sshpass -p "${{ secrets.HETZNER_PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ secrets.HETZNER_USER }}@${{ secrets.HETZNER_HOST }} '
+            cd ${{ secrets.HETZNER_PROJECT_PATH }} &&
+            docker compose pull &&
+            docker compose up -d --build
+          '
