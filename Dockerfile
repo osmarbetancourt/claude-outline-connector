@@ -6,11 +6,11 @@ WORKDIR /app
 # Install uv for fast, reproducible dependency resolution
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-COPY pyproject.toml LICENSE ./
+COPY pyproject.toml LICENSE README.md ./
 COPY src/ src/
 
 # Install production dependencies into an isolated venv
-RUN uv sync --no-dev
+RUN uv sync --no-dev --no-editable
 
 # ---------- runtime stage ----------
 FROM python:3.11-slim
