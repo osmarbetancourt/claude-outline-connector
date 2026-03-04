@@ -7,6 +7,7 @@ from base64 import urlsafe_b64encode
 import httpx
 import uvicorn
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse
 
@@ -37,10 +38,16 @@ if OAUTH_CLIENT_ID and not MCP_SERVER_URL:
 # FastMCP instance — stateless HTTP (no session state, plain JSON responses)
 # ---------------------------------------------------------------------------
 
+_public_host = MCP_SERVER_URL.removeprefix("https://").removeprefix("http://").rstrip("/")
+
 mcp = FastMCP(
     "outline",
     stateless_http=True,
     json_response=True,
+    transport_security=TransportSecuritySettings(
+        allowed_hosts=["localhost", "localhost:*", _public_host],
+        allowed_origins=["https://" + _public_host, "http://localhost", "http://localhost:*"],
+    ),
 )
 
 # ---------------------------------------------------------------------------
