@@ -17,4 +17,4 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/outline_mcp"]
+packages = ["src/outline_mcp", "src/github_mcp"]
