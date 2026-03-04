@@ -201,8 +201,8 @@ async def _oauth_token(request: Request):
     return {"access_token": token, "token_type": "bearer", "expires_in": expires_in}
 
 
-# Mount FastMCP's ASGI app — handles /mcp
-app.mount("/", mcp.streamable_http_app())
+# Mount FastMCP's ASGI app at /mcp (Claude.ai hits POST /mcp and GET /mcp)
+app.mount("/mcp", mcp.streamable_http_app())
 
 # ---------------------------------------------------------------------------
 # Outline API client — single private helper, all calls go through here
