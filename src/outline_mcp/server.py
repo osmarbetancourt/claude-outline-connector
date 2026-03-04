@@ -3,13 +3,12 @@ import os
 import secrets
 import time
 from base64 import urlsafe_b64encode
-from contextlib import asynccontextmanager
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse, RedirectResponse
 
 # ---------------------------------------------------------------------------
 # Config — fail fast if required env vars are missing
@@ -66,59 +65,32 @@ def _prune_expired() -> None:
 
 
 # ---------------------------------------------------------------------------
-# FastAPI app — serves OAuth endpoints and mounts the FastMCP ASGI sub-app
+# Bearer auth middleware — added directly to the FastMCP app
 # ---------------------------------------------------------------------------
 
-
-@asynccontextmanager
-async def _lifespan(app: FastAPI):
-    yield
-
-
-app = FastAPI(lifespan=_lifespan, redirect_slashes=False)
+@mcp.custom_route("/__auth_middleware__", methods=["GET"])  # dummy — middleware is set via lifespan
+async def _dummy(request: Request) -> JSONResponse:  # never called
+    return JSONResponse({})
 
 
-@app.middleware("http")
-async def _bearer_auth(request: Request, call_next):
-    """Protect /mcp with Bearer token auth when OAuth is configured."""
-    # OAuth discovery and flow endpoints must be publicly accessible
-    path = request.url.path
-    if not path.startswith("/mcp"):
-        return await call_next(request)
+# We add middleware via the ASGI app after creation (see bottom of file).
 
-    # No OAuth configured → allow all (local dev / authless connector)
-    if not OAUTH_CLIENT_ID:
-        return await call_next(request)
+# ---------------------------------------------------------------------------
+# OAuth 2.1 discovery endpoints
+# ---------------------------------------------------------------------------
 
-    _prune_expired()
-
-    auth = request.headers.get("Authorization", "")
-    token = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else ""
-    now = time.time()
-    if not token or token not in _access_tokens or _access_tokens[token] < now:
-        return JSONResponse(
-            {"error": "Unauthorized"},
-            status_code=401,
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return await call_next(request)
-
-
-# --- OAuth 2.1 discovery endpoints ---
-
-
-@app.get("/.well-known/oauth-protected-resource")
-async def _oauth_protected_resource():
-    return {
+@mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
+async def _oauth_protected_resource(request: Request) -> JSONResponse:
+    return JSONResponse({
         "resource": MCP_SERVER_URL,
         "authorization_servers": [MCP_SERVER_URL],
         "bearer_methods_supported": ["header"],
-    }
+    })
 
 
-@app.get("/.well-known/oauth-authorization-server")
-async def _oauth_server_metadata():
-    return {
+@mcp.custom_route("/.well-known/oauth-authorization-server", methods=["GET"])
+async def _oauth_server_metadata(request: Request) -> JSONResponse:
+    return JSONResponse({
         "issuer": MCP_SERVER_URL,
         "authorization_endpoint": f"{MCP_SERVER_URL}/oauth/authorize",
         "token_endpoint": f"{MCP_SERVER_URL}/oauth/token",
@@ -126,47 +98,45 @@ async def _oauth_server_metadata():
         "grant_types_supported": ["authorization_code"],
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["client_secret_post"],
-    }
+    })
 
 
-# --- OAuth 2.1 authorize endpoint — auto-approves (personal server) ---
+# ---------------------------------------------------------------------------
+# OAuth 2.1 authorize endpoint — auto-approves (personal server)
+# ---------------------------------------------------------------------------
 
-
-@app.get("/oauth/authorize")
-async def _oauth_authorize(
-    response_type: str,
-    client_id: str,
-    redirect_uri: str,
-    state: str = "",
-    code_challenge: str = "",
-    code_challenge_method: str = "S256",
-):
+@mcp.custom_route("/oauth/authorize", methods=["GET"])
+async def _oauth_authorize(request: Request) -> JSONResponse | RedirectResponse:
+    params = request.query_params
     if not OAUTH_CLIENT_ID:
         return JSONResponse({"error": "OAuth not configured on this server"}, status_code=400)
-    if client_id != OAUTH_CLIENT_ID:
+    if params.get("client_id") != OAUTH_CLIENT_ID:
         return JSONResponse({"error": "unknown_client"}, status_code=400)
-    if response_type != "code":
+    if params.get("response_type") != "code":
         return JSONResponse({"error": "unsupported_response_type"}, status_code=400)
 
     code = secrets.token_urlsafe(32)
+    redirect_uri = params.get("redirect_uri", "")
     _auth_codes[code] = {
-        "client_id": client_id,
+        "client_id": params.get("client_id"),
         "redirect_uri": redirect_uri,
-        "code_challenge": code_challenge,
-        "expires_at": time.time() + 300,  # 5 minutes
+        "code_challenge": params.get("code_challenge", ""),
+        "expires_at": time.time() + 300,
     }
 
     location = f"{redirect_uri}?code={code}"
+    state = params.get("state", "")
     if state:
         location += f"&state={state}"
     return RedirectResponse(location, status_code=302)
 
 
-# --- OAuth 2.1 token endpoint ---
+# ---------------------------------------------------------------------------
+# OAuth 2.1 token endpoint
+# ---------------------------------------------------------------------------
 
-
-@app.post("/oauth/token")
-async def _oauth_token(request: Request):
+@mcp.custom_route("/oauth/token", methods=["POST"])
+async def _oauth_token(request: Request) -> JSONResponse:
     form = await request.form()
     grant_type = str(form.get("grant_type", ""))
     code = str(form.get("code", ""))
@@ -185,7 +155,6 @@ async def _oauth_token(request: Request):
     if not code_data or code_data["expires_at"] < time.time():
         return JSONResponse({"error": "invalid_grant"}, status_code=400)
 
-    # Verify PKCE S256
     if code_data["code_challenge"]:
         verifier_hash = (
             urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest())
@@ -198,16 +167,12 @@ async def _oauth_token(request: Request):
     token = secrets.token_urlsafe(32)
     expires_in = 86400 * 30  # 30 days
     _access_tokens[token] = time.time() + expires_in
-    return {"access_token": token, "token_type": "bearer", "expires_in": expires_in}
+    return JSONResponse({"access_token": token, "token_type": "bearer", "expires_in": expires_in})
 
-
-# Mount FastMCP's ASGI app at /mcp (Claude.ai hits POST /mcp and GET /mcp)
-app.mount("/mcp", mcp.streamable_http_app())
 
 # ---------------------------------------------------------------------------
-# Outline API client — single private helper, all calls go through here
+# Outline API client
 # ---------------------------------------------------------------------------
-
 
 async def _outline_post(endpoint: str, payload: dict) -> dict:
     """POST to the Outline API and return the unwrapped data payload."""
@@ -219,16 +184,14 @@ async def _outline_post(endpoint: str, payload: dict) -> dict:
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(url, json=payload, headers=headers)
-        response.raise_for_status()  # HTTPStatusError surfaces as a tool error in Claude
+        response.raise_for_status()
         body = response.json()
-        # Outline wraps results in {"ok": true, "data": {...}, "pagination": {...}}
         return body.get("data", body)
 
 
 # ---------------------------------------------------------------------------
-# Generic passthrough — gives the agent access to the entire Outline API
+# MCP tools
 # ---------------------------------------------------------------------------
-
 
 @mcp.tool()
 async def outline_api(endpoint: str, payload: dict) -> dict:
@@ -247,11 +210,6 @@ async def outline_api(endpoint: str, payload: dict) -> dict:
         response body if no 'data' key is present.
     """
     return await _outline_post(endpoint, payload)
-
-
-# ---------------------------------------------------------------------------
-# Named helpers — common operations with typed parameters for ergonomics
-# ---------------------------------------------------------------------------
 
 
 @mcp.tool()
@@ -379,6 +337,39 @@ async def outline_delete_document(id: str) -> dict:
     """
     return await _outline_post("documents.delete", {"id": id})
 
+
+# ---------------------------------------------------------------------------
+# Build the final ASGI app with bearer auth middleware
+# ---------------------------------------------------------------------------
+
+from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
+
+
+class _BearerAuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if not path.startswith("/mcp"):
+            return await call_next(request)
+        if not OAUTH_CLIENT_ID:
+            return await call_next(request)
+
+        _prune_expired()
+
+        auth = request.headers.get("Authorization", "")
+        token = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else ""
+        now = time.time()
+        if not token or token not in _access_tokens or _access_tokens[token] < now:
+            return JSONResponse(
+                {"error": "Unauthorized"},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return await call_next(request)
+
+
+_base_app = mcp.streamable_http_app()
+_base_app.add_middleware(_BearerAuthMiddleware)
+app = _base_app
 
 # ---------------------------------------------------------------------------
 # Entrypoint

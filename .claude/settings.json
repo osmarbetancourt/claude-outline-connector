@@ -4,7 +4,8 @@
       "mcp__claude_ai_Context7__resolve-library-id",
       "Bash(python3 -c \"import inspect; from mcp.server.fastmcp import FastMCP; mcp = FastMCP\\(''test''\\); app = mcp.streamable_http_app\\(\\); print\\(type\\(app\\)\\); print\\([r.path for r in getattr\\(app, ''routes'', []\\)]\\)\")",
       "Bash(pip show mcp)",
-      "Read(//home/osmar/**)"
+      "Read(//home/osmar/**)",
+      "WebFetch(domain:gofastmcp.com)"
     ]
   }
 }
