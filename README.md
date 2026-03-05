@@ -1,273 +1,197 @@
-# claude-outline-connector
 
-A remote MCP server that exposes your self-hosted [Outline](https://www.getoutline.com/) wiki to Claude. Once deployed, Claude can search, read, create, and update your wiki documents — from Claude Code, Claude.ai, or Claude mobile.
 
-The Outline instance stays fully on-premises. Only this small proxy needs a public HTTPS URL.
+# Claude Outline Connector
 
----
+![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python)
+![License](https://img.shields.io/github/license/osmarbetancourt/claude-outline-connector)
+![MCP](https://img.shields.io/badge/MCP-Server-brightgreen)
+![Docker](https://img.shields.io/badge/Docker-Compose-blue?logo=docker)
 
-## How it works
+<p align="center">
+	<img src="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-png/light/claude-color.png" width="100" alt="Claude Logo"/>
+</p>
+<p align="center" style="font-size:0.95em; color:#888;">
+	<em><strong>Disclaimer:</strong> This project is not affiliated with or endorsed by Anthropic. The Claude logo is used solely to visually associate this repository with Claude and the MCP protocol.</em>
+</p>
 
-```
-Claude Code / Claude.ai
-        │  (Streamable HTTP / MCP protocol)
-        ▼
-  outline-mcp  ◄──── OUTLINE_API_KEY
-  (this server)
-        │  (HTTPS POST + Bearer token)
-        ▼
-  Your Outline instance  (on-prem)
-```
+> **A remote MCP server that connects Claude to your self-hosted [Outline](https://www.getoutline.com/) wiki. Claude can search, read, create, and update your documents — from Claude.ai, Claude Code, or Claude mobile.**
 
 ---
 
-## Prerequisites
 
-- A self-hosted Outline instance (any recent version)
-- An Outline API key — create one at `https://your-outline/settings/tokens`
-- Docker **or** Python 3.11+ with [uv](https://docs.astral.sh/uv/)
-- A public HTTPS URL for the server (required for Claude.ai connectors)
+## Connected in Claude.ai
+
+![Outline MCP connected in Claude.ai](docs/images/outline_example.png)
+
+## Claude using it in a conversation
+
+![Claude using Outline MCP to create a document](docs/images/example_claude_web_using_mcp.png)
+
+## Result generated inside Outline
+
+![Document created by Claude inside Outline](docs/images/result_example.png)
 
 ---
 
-## Quick start — Docker Compose (recommended)
+
+## Key Features
+
+- **Full Outline API coverage:** Search, read, create, update, and delete documents and collections. Plus `outline_api` to call any of Outline's 100+ endpoints without a server update.
+- **OAuth 2.1 + PKCE:** Secure, standards-compliant auth flow — works natively with Claude.ai's connector dialog.
+- **Zero infrastructure overhead:** Your Outline instance stays fully on-prem. Only this small proxy needs a public HTTPS URL.
+- **Docker Compose ready:** Runs alongside Caddy on a shared Docker network. HTTPS handled automatically.
+
+---
+
+
+## Quick Start
 
 ```bash
 git clone https://github.com/osmarbetancourt/claude-outline-connector.git
 cd claude-outline-connector
 
 cp .env.example .env
-$EDITOR .env   # set OUTLINE_BASE_URL and OUTLINE_API_KEY
+$EDITOR .env  # fill in the required values
 
-# Create the external network once on the host (shared with Caddy)
-docker network create caddy_net
-
+docker network create caddy_net  # shared network with Caddy (once per host)
 docker compose up -d --build
 ```
 
-Verify it's running:
-
-```bash
-curl -s -X POST http://localhost:8765/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | jq '.result.tools[].name'
-```
-
-The container exposes port **8765** on the host for direct access / testing.
-Caddy reaches the container at `outline-mcp:8000` over the shared `caddy_net` network.
-
 ---
 
-## Quick start — local dev (uv)
 
+## Environment Variables
+
+Copy `.env.example` to `.env`:
+
+| Variable | Required | Description |
+|---|---|---|
+| `OUTLINE_BASE_URL` | Yes | Base URL of your Outline instance, e.g. `https://wiki.example.com` |
+| `OUTLINE_API_KEY` | Yes | Outline API key — Outline → Settings → API → New token |
+| `MCP_HOST` | No | Bind host (default: `0.0.0.0`) |
+| `MCP_PORT` | No | Bind port (default: `8765`) |
+| `MCP_SERVER_URL` | OAuth only | Public HTTPS URL of this server, e.g. `https://mcp.example.com` |
+| `OAUTH_CLIENT_ID` | OAuth only | Any string — enter the same value in Claude.ai's connector dialog |
+| `OAUTH_CLIENT_SECRET` | OAuth only | Strong random secret — enter the same value in Claude.ai's connector dialog |
+
+Generate a secret:
 ```bash
-uv sync
-cp .env.example .env && $EDITOR .env
-set -a && source .env && set +a
-uv run python -m outline_mcp.server
-```
-
----
-
-## Authentication setup
-
-The server implements **OAuth 2.1 with PKCE** to protect the `/mcp` endpoint. Before adding it to Claude.ai, configure credentials in your `.env`:
-
-```bash
-# 1. Choose any identifier for your connector
-OAUTH_CLIENT_ID=my-outline-connector
-
-# 2. Generate a strong random secret
 python -c "import secrets; print(secrets.token_urlsafe(32))"
-# → paste the output as OAUTH_CLIENT_SECRET
-
-OAUTH_CLIENT_SECRET=<generated secret>
-
-# 3. Set the public HTTPS URL of this server (no trailing slash, no /mcp)
-MCP_SERVER_URL=https://mcp.example.com
 ```
 
-> Leave all three empty for local dev — the server runs without auth.
+> Leave all OAuth vars empty for local dev — the server runs without auth.
 
 ---
 
-## Connect to Claude
 
-### Option A — Claude.ai connector (recommended)
+## Connect to Claude.ai
 
-Works in Claude.ai browser/desktop/mobile **and automatically syncs to Claude Code** when you're logged in.
+1. Go to **claude.ai → Settings → Connectors → Add custom connector**
+2. **Server URL:** `https://mcp.yourdomain.com` *(no `/mcp` suffix)*
+3. **OAuth Client ID / Secret:** the values from your `.env`
+4. Click **Add** — Claude handles the OAuth flow automatically
 
-1. Go to `claude.ai` → **Settings → Connectors → Add custom connector**
-2. **Server URL:** `https://your-server.com` *(base URL — not `/mcp`)*
-3. **OAuth Client ID:** paste the value of your `OAUTH_CLIENT_ID` env var
-4. **OAuth Client Secret:** paste the value of your `OAUTH_CLIENT_SECRET` env var
-5. Click **Add** — Claude will perform the OAuth flow automatically
-
-> **HTTPS is required** for Claude.ai connectors. See [Deployment](#deployment) below.
-
-### Option B — Claude Code CLI (local or remote)
+### Claude Code CLI
 
 ```bash
-# Local dev (no auth)
-claude mcp add --transport http outline http://localhost:8000/mcp
-
-# Remote server with Bearer token (bypasses OAuth for CLI use)
-claude mcp add --transport http outline https://your-server.com/mcp \
+claude mcp add --transport http outline https://mcp.yourdomain.com/mcp \
   --header "Authorization: Bearer <access_token>"
 ```
 
-> The `<access_token>` is issued automatically by the OAuth flow when you connect via Claude.ai. You can also obtain one manually by running the OAuth flow with `curl` — see [Troubleshooting](#troubleshooting).
+---
 
-Verify: `claude mcp list`
+
+## Available Tools
+
+| Tool | Description |
+|---|---|
+| `outline_search` | Search documents by keyword |
+| `outline_get_document` | Get full document content |
+| `outline_list_collections` | List all collections |
+| `outline_list_documents` | List documents in a collection |
+| `outline_create_document` | Create and publish a new document |
+| `outline_update_document` | Update title and/or content |
+| `outline_delete_document` | Delete a document permanently |
+| `outline_api` | Call **any** Outline API endpoint directly |
 
 ---
 
-## Available tools
 
-| Tool | Description | Key parameters |
-|---|---|---|
-| `outline_api` | **Call any Outline API endpoint directly** — full API freedom | `endpoint`, `payload` |
-| `outline_search` | Search documents by keyword | `query`, `collection_id?` |
-| `outline_get_document` | Get full document content | `id` |
-| `outline_list_collections` | List all collections | — |
-| `outline_list_documents` | List documents in a collection | `collection_id` |
-| `outline_create_document` | Create and publish a new document | `title`, `text`, `collection_id`, `parent_document_id?` |
-| `outline_update_document` | Update title and/or content | `id`, `title?`, `text?` |
-| `outline_delete_document` | Delete a document permanently | `id` |
+## Example Usage
 
-`outline_api` is the power tool — it lets Claude call any of Outline's 100+ API endpoints (`documents.star`, `users.list`, `groups.list`, `fileOperations.list`, etc.) without needing a server update. See the [Outline API reference](https://www.getoutline.com/developers).
-
-**Example usage in Claude:**
+**Search your wiki:**
 ```
 "Search my Outline wiki for anything about deployment"
-"Create a new document titled 'Meeting Notes 2026-03-04' in the Engineering collection"
-"List all my Outline collections"
+```
+
+**Create a document:**
+```
+"Create a new document titled 'Meeting Notes 2026-03-05' in the Engineering collection"
+```
+
+**Use the power tool:**
+```
 "Star the document with id abc-123 using outline_api"
 ```
 
 ---
 
-## Deployment
 
-Claude.ai connectors require a public HTTPS URL. Here are two paths:
+## Deployment (VPS + Caddy)
 
-### Render / Railway (easiest)
-
-1. Push this repo to GitHub
-2. Create a new **Web Service** on [Render](https://render.com) or [Railway](https://railway.app)
-3. Point it at your repo, select **Docker** as the runtime
-4. Add `OUTLINE_BASE_URL` and `OUTLINE_API_KEY` as environment variables in the dashboard
-5. Use the generated `https://your-app.onrender.com/mcp` URL as the connector URL
-
-### VPS + Caddy (docker-compose + external network)
-
-This repo is designed to run alongside a separate Caddy container/service that
-shares the `caddy_net` Docker network.
-
-**Step 1 — create the shared network (once per host)**
-
+**1. Create the shared network (once per host)**
 ```bash
 docker network create caddy_net
 ```
 
-**Step 2 — wire Caddy to the same network**
-
-In your Caddy repo's `docker-compose.yml`, attach Caddy to `caddy_net`:
-
-```yaml
-services:
-  caddy:
-    image: caddy:latest
-    networks:
-      - caddy_net
-    # ... rest of your Caddy config
-
-networks:
-  caddy_net:
-    external: true
+**2. Add an entry to your Caddyfile**
 ```
-
-**Step 3 — add a block in your Caddyfile**
-
-```
-wiki-mcp.yourdomain.com {
+mcp.yourdomain.com {
     reverse_proxy outline-mcp:8000
 }
 ```
 
-Caddy resolves `outline-mcp` by container name on the shared network and handles
-HTTPS automatically. No port binding needed on Caddy's side.
-
----
-
-## Testing with MCP Inspector
-
+**3. Deploy**
 ```bash
-npx @modelcontextprotocol/inspector http://localhost:8000/mcp
+docker compose up -d --build
 ```
 
-Opens a browser UI where you can call each tool interactively and inspect request/response payloads.
+Caddy resolves the container by name on the shared network and handles HTTPS automatically.
 
 ---
 
-## Environment variables
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `OUTLINE_BASE_URL` | Yes | — | Base URL of your Outline instance, e.g. `https://wiki.example.com` |
-| `OUTLINE_API_KEY` | Yes | — | Outline API key from Settings → API |
-| `MCP_HOST` | No | `0.0.0.0` | Host the MCP server binds to |
-| `MCP_PORT` | No | `8000` | Port the MCP server listens on |
-| `MCP_SERVER_URL` | OAuth only | — | Public HTTPS base URL of this server, e.g. `https://mcp.example.com` |
-| `OAUTH_CLIENT_ID` | OAuth only | — | Client ID you enter in Claude.ai's connector dialog |
-| `OAUTH_CLIENT_SECRET` | OAuth only | — | Client secret you enter in Claude.ai's connector dialog |
-
-Set all three OAuth vars to enable authentication, or leave all three empty for local dev.
-
----
-
-## Known issue — Claude Desktop / Cowork
-
-There is an [open bug](https://github.com/anthropics/claude-code/issues/23736) where Streamable HTTP-only MCP servers can fail silently when added via the Claude Desktop or Cowork connector UI. The same server works correctly via:
-
-- Claude.ai **Settings → Connectors** (browser)
-- Claude Code CLI: `claude mcp add --transport http ...`
-
-Use one of those two methods until the Desktop UI issue is resolved.
-
----
 
 ## Troubleshooting
 
-**`401 Unauthorized` from Outline**
-Check that `OUTLINE_API_KEY` is correct. Generate a new key at `https://your-outline/settings/tokens`.
+**`421 Misdirected Request`** — `MCP_SERVER_URL` doesn't match the domain Caddy forwards. Set it to the exact public URL (no trailing slash).
 
-**`Connection refused` or `Name resolution failed`**
-Check `OUTLINE_BASE_URL` — it must be reachable from the server where outline-mcp is running, with no trailing slash.
+**`401 Unauthorized` from Outline** — check `OUTLINE_API_KEY`. Generate a new one at `https://your-outline/settings/tokens`.
 
-**`KeyError: 'OUTLINE_API_KEY'` on startup**
-The env var is not set. Use `--env-file .env` with Docker or `source .env` locally.
-
-**Claude.ai says "Could not connect" or OAuth flow fails**
-- Confirm `MCP_SERVER_URL` matches the URL you enter in Claude.ai exactly (no trailing slash, no `/mcp`)
-- Test the discovery endpoint: `curl https://your-server.com/.well-known/oauth-protected-resource`
-- Make sure the server is accessible over public HTTPS: `curl -X POST https://your-server.com/mcp -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'` should return `401 Unauthorized`
-
-**Get an access token manually (for Claude Code CLI `--header` use)**
+**OAuth flow fails** — test the discovery endpoint:
 ```bash
-# Step 1 — get the auth code (replace values with your own; redirect_uri can be anything)
-curl -v "https://your-server.com/oauth/authorize?response_type=code&client_id=YOUR_CLIENT_ID&redirect_uri=https://example.com/cb&code_challenge=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU&code_challenge_method=S256"
-# Note the `code=` value from the Location header redirect
-
-# Step 2 — exchange code for token
-curl -s -X POST https://your-server.com/oauth/token \
-  -d "grant_type=authorization_code&code=CODE&client_id=YOUR_CLIENT_ID&client_secret=YOUR_SECRET&code_verifier=aaaa"
-# Returns {"access_token":"...","token_type":"bearer","expires_in":2592000}
+curl https://mcp.yourdomain.com/.well-known/oauth-protected-resource
 ```
-> For local testing, use `code_challenge=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU` (SHA256 of empty string) with `code_verifier=` (empty string).
+
+**Claude.ai says "Could not connect"** — confirm the server is reachable:
+```bash
+curl -X POST https://mcp.yourdomain.com/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+# should return 401 Unauthorized
+```
 
 ---
 
+
 ## License
 
-MIT — see [LICENSE](LICENSE).
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+## Support / Contact
+
+For questions, feedback, or support, contact: **oaba.dev@gmail.com**
+
+<p align="center">
+	<i>Made with ❤️ for on-prem Outline users.<br>
+	<b>Give Claude access to your knowledge base.</b></i>
+</p>
