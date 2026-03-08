@@ -28,6 +28,19 @@ services:
       - caddy_net
     command: ["python", "-m", "github_mcp.server"]
 
+  figma-mcp:
+    build: .
+    container_name: figma-mcp
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MCP_PORT: "8767"
+    ports:
+      - "8767:8767"
+    networks:
+      - caddy_net
+    command: ["python", "-m", "figma_mcp.server"]
+
 networks:
   caddy_net:
     external: true

@@ -25,6 +25,10 @@ jobs:
           GITHUB_MCP_SERVER_URL=${{ secrets.MCP_GITHUB_SERVER_URL }}
           OAUTH_CLIENT_ID_GITHUB=${{ secrets.OAUTH_CLIENT_ID_GITHUB }}
           OAUTH_CLIENT_SECRET_GITHUB=${{ secrets.OAUTH_CLIENT_SECRET_GITHUB }}
+          FIGMA_API_KEY=${{ secrets.FIGMA_API_KEY }}
+          FIGMA_MCP_SERVER_URL=${{ secrets.FIGMA_MCP_SERVER_URL }}
+          OAUTH_CLIENT_ID_FIGMA=${{ secrets.OAUTH_CLIENT_ID_FIGMA }}
+          OAUTH_CLIENT_SECRET_FIGMA=${{ secrets.OAUTH_CLIENT_SECRET_FIGMA }}
           EOF
 
       - name: Install sshpass
