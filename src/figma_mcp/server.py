@@ -12,6 +12,7 @@ Tools:
   figma_api       — escape-hatch to call any Figma REST endpoint
 """
 
+import base64
 import hashlib
 import os
 import secrets
@@ -372,40 +373,82 @@ async def get_styles(file_key: str) -> dict:
     return {"styles": styles, "count": len(styles)}
 
 
+# Max image size to embed as base64 (500 KB). Larger images return URL only.
+_MAX_EMBED_BYTES = 500_000
+
+
 @mcp.tool()
 async def export_node(
     file_key: str,
     node_id: str,
     format: str = "png",
-    scale: float = 2,
+    scale: float = 1,
+    thumbnail: bool = False,
+    url_only: bool = False,
 ) -> dict:
     """
-    Export a node as an image and return its CDN URL.
-    Useful for getting screenshots of specific frames, components, or pages.
+    Export a node as an image. By default fetches the image server-side and
+    returns it as base64 so Claude can actually see and analyze the design.
 
     Args:
-        file_key: The file key from the Figma URL.
-        node_id:  Node ID to export (e.g. '123:456'). Find node IDs via
-                  list_pages or get_components.
-        format:   Image format — 'png', 'jpg', 'svg', or 'pdf'. Default: 'png'.
-        scale:    Scale factor (0.01 to 4). Default: 2 (2x resolution).
+        file_key:  The file key from the Figma URL.
+        node_id:   Node ID to export (e.g. '123:456'). Find node IDs via
+                   list_pages or get_components.
+        format:    Image format — 'png', 'jpg', 'svg', or 'pdf'. Default: 'png'.
+        scale:     Scale factor (0.01 to 4). Default: 1 (1x — good balance of
+                   detail vs size). Use 0.5 for large pages, 2 for small components.
+        thumbnail: If True, forces scale=0.25 for a quick low-res overview.
+                   Great for scanning all pages without blowing up context.
+        url_only:  If True, skips the server-side fetch and returns just the
+                   CDN URL (useful when you only need the link, not the pixels).
 
     Returns:
-        Dict with the image URL. The URL expires after ~14 days.
+        Dict with image_url (always), image_data (base64, when possible),
+        and size_bytes.
     """
+    if thumbnail:
+        scale = 0.25
+
     data = await _figma_get(
         f"v1/images/{file_key}",
         params={"ids": node_id, "format": format, "scale": scale},
     )
-    images = data.get("images", {})
-    image_url = images.get(node_id)
-    return {
+    image_url = data.get("images", {}).get(node_id)
+
+    result: dict = {
         "node_id": node_id,
         "format": format,
         "scale": scale,
         "image_url": image_url,
-        "expires": "~14 days",
     }
+
+    if not image_url or url_only or format in ("svg", "pdf"):
+        return result
+
+    # Fetch the image server-side and embed as base64
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            img_resp = await client.get(image_url)
+            img_resp.raise_for_status()
+            img_bytes = img_resp.content
+
+        result["size_bytes"] = len(img_bytes)
+
+        if len(img_bytes) <= _MAX_EMBED_BYTES:
+            b64 = base64.b64encode(img_bytes).decode()
+            mime = "image/jpeg" if format == "jpg" else f"image/{format}"
+            result["image_data"] = f"data:{mime};base64,{b64}"
+        else:
+            result["image_data"] = None
+            result["note"] = (
+                f"Image is {len(img_bytes) // 1024}KB — too large to embed. "
+                f"Use a lower scale or thumbnail=True, or open image_url directly."
+            )
+    except httpx.HTTPError:
+        result["image_data"] = None
+        result["note"] = "Could not fetch image from Figma CDN. Use image_url directly."
+
+    return result
 
 
 @mcp.tool()
