@@ -373,8 +373,8 @@ async def get_styles(file_key: str) -> dict:
     return {"styles": styles, "count": len(styles)}
 
 
-# Max image size to embed as base64 (500 KB). Larger images return URL only.
-_MAX_EMBED_BYTES = 500_000
+# Max image size to embed as base64 (750 KB). Larger images return URL only.
+_MAX_EMBED_BYTES = 750_000
 
 
 @mcp.tool()
